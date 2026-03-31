@@ -1,6 +1,6 @@
 const GamePlay = require('./GamePlay');
 const themes = require('./themes');
-const Bowman = require('./characters/Bowman'); 
+const Bowman = require('./characters/Bowman');
 const Swordsman = require('./characters/Swordsman');
 const Magician = require('./characters/Magician');
 const Undead = require('./characters/Undead');
@@ -27,6 +27,7 @@ const levelThemes = {
 
 const playerTypes = [Bowman, Swordsman, Magician];
 const enemyTypes = [Vampire, Undead, Daemon];
+
 class GameController {
   constructor(gamePlay, stateService) {
     this.gamePlay = gamePlay;
@@ -35,12 +36,11 @@ class GameController {
     this.playerPositions = [0, 1, 8, 9, 16, 17, 24, 25];
     this.enemyPositions = [6, 7, 14, 15, 22, 23, 30, 31];
     this.selectedCharacter = null;
-    this.currentPlayer = 'player'; // player или computer
+    this.currentPlayer = 'player';
     this.currentLevel = 1;
     this.score = 0;
     this.maxScore = 0;
     this.positionedCharacters = [];
-    this.gameState = null;
   }
 
   init() {
@@ -70,41 +70,38 @@ class GameController {
   }
 
   initLevel() {
-    // указывает команды игроков
     const playerTeam = generateTeam(playerTypes, this.currentLevel, 4);
     const enemyTeam = generateTeam(enemyTypes, this.currentLevel, 4);
 
-    // расставляем позиции
-    this.selectedPlayerPositions = this.getRandomPositions(this.playerPositions, playerTeam.characters.length);
-    this.selectedEnemyPositions = this.getRandomPositions(this.enemyPositions, enemyTeam.characters.length);
+    const selectedPlayerPositions = this.getUniquePositions(this.playerPositions, playerTeam.characters.length);
+    const selectedEnemyPositions = this.getUniquePositions(this.enemyPositions, enemyTeam.characters.length);
 
     const positionedCharacters = [];
-    // размещение игроков
+
     playerTeam.characters.forEach((character, index) => {
-      positionedCharacters.push(new PositionedCharacter(character, this.selectedPlayerPositions[index]));
+      positionedCharacters.push(new PositionedCharacter(character, selectedPlayerPositions[index]));
     });
 
-    // размещение врагов
     enemyTeam.characters.forEach((character, index) => {
-      positionedCharacters.push(new PositionedCharacter(character, this.selectedEnemyPositions[index]));
+      positionedCharacters.push(new PositionedCharacter(character, selectedEnemyPositions[index]));
     });
 
-    // отрисовка позиций
     this.gamePlay.redrawPositions(positionedCharacters);
     this.positionedCharacters = positionedCharacters;
   }
 
+  getUniquePositions(availablePositions, count) {
+    const shuffled = [...availablePositions].sort(() => 0.5 - Math.random());
+    return shuffled.slice(0, count);
+  }
+
   initEventListeners() {
-    // события кликов
     this.gamePlay.addCellEnterListener(this.onCellEnter.bind(this));
     this.gamePlay.addCellLeaveListener(this.onCellLeave.bind(this));
     this.gamePlay.addCellClickListener(this.onCellClick.bind(this));
     this.gamePlay.addNewGameListener(this.onNewGameClick.bind(this));
-  }
-
-  getRandomPositions(availablePositions, count) {
-    const shuffled = [...availablePositions].sort(() => 0.5 - Math.random());
-    return shuffled.slice(0, count);
+    this.gamePlay.addSaveGameListener(this.onSaveGameClick.bind(this));
+    this.gamePlay.addLoadGameListener(this.onLoadGameClick.bind(this));
   }
 
   onCellEnter(index) {
@@ -133,7 +130,6 @@ class GameController {
     }
 
     if (this.selectedCharacter) {
-      // Уже выбран персонаж - пытаемся атаковать или переместиться
       const target = this.positionedCharacters.find((char) => char.position === index);
       if (target && this.isEnemy(target.character.type)) {
         await this.performAttack(this.selectedCharacter, target, index);
@@ -143,7 +139,6 @@ class GameController {
         this.gamePlay.showError('Невозможное действие');
       }
     } else if (character && this.isPlayerCharacter(character.character.type)) {
-      // Выбор своего персонажа
       if (this.currentPlayer === 'player') {
         this.selectCharacter(character);
       }
@@ -156,6 +151,25 @@ class GameController {
     this.startNewGame();
   }
 
+  onSaveGameClick() {
+    this.saveGame();
+    this.gamePlay.showMessage('Игра сохранена');
+  }
+
+  onLoadGameClick() {
+    try {
+      const savedState = this.stateService.load();
+      if (savedState) {
+        this.loadGame(savedState);
+        this.gamePlay.showMessage('Игра загружена');
+      } else {
+        this.gamePlay.showError('Нет сохраненной игры');
+      }
+    } catch (e) {
+      this.gamePlay.showError('Ошибка загрузки');
+    }
+  }
+
   selectCharacter(character) {
     if (this.selectedCharacter) {
       this.gamePlay.deselectCell(this.selectedCharacter.position);
@@ -164,13 +178,20 @@ class GameController {
     this.gamePlay.selectCell(character.position);
   }
 
+  clearSelection() {
+    if (this.selectedCharacter) {
+      this.gamePlay.deselectCell(this.selectedCharacter.position);
+      this.selectedCharacter = null;
+    }
+  }
+
   async performAttack(attacker, target, targetPos) {
     const attackRange = getAttackRange(attacker.character.type);
     if (!canAttack(attacker.position, targetPos, attackRange, this.boardSize)) {
       this.gamePlay.showError('Слишком далеко для атаки');
       return;
     }
-    // высчисляем урон
+
     const damage = Math.max(
       attacker.character.attack - target.character.defence,
       attacker.character.attack * 0.1,
@@ -178,7 +199,6 @@ class GameController {
 
     target.character.health -= damage;
 
-    // анимация урона
     await this.gamePlay.showDamage(targetPos, damage);
 
     if (target.character.health <= 0) {
@@ -188,26 +208,19 @@ class GameController {
 
     this.gamePlay.redrawPositions(this.positionedCharacters);
 
-    if (this.selectedCharacter) {
-      this.gamePlay.deselectCell(this.selectedCharacter.position);
-      this.selectedCharacter = null;
-    }
+    this.clearSelection();
 
-    // проверим конец уровня
     if (this.checkLevelComplete()) {
       this.levelUp();
     } else {
-      this.endTurn();// переход компьютеру
+      this.endTurn();
     }
   }
 
   async performMove(character, newPos) {
     character.position = newPos;
     this.gamePlay.redrawPositions(this.positionedCharacters);
-    if (this.selectedCharacter) {
-      this.gamePlay.deselectCell(this.selectedCharacter.position);
-      this.selectedCharacter = null;
-    }
+    this.clearSelection();
     this.endTurn();
   }
 
@@ -235,7 +248,6 @@ class GameController {
 
     const enemy = enemies[Math.floor(Math.random() * enemies.length)];
 
-    // Ищем цель для атаки (ближайшего игрока)
     let closestPlayer = null;
     let minDistance = Infinity;
 
@@ -250,11 +262,9 @@ class GameController {
       }
     });
 
-    // Проверяем может ли враг атаковать
     if (closestPlayer && this.canEnemyAttack(enemy, closestPlayer)) {
       this.performAttack(enemy, closestPlayer, closestPlayer.position);
     } else {
-      // Враг не может атаковать, пытается переместиться ближе
       this.computerMove(enemy, playerChars);
     }
   }
@@ -263,7 +273,6 @@ class GameController {
     const moveRange = getMoveRange(enemy.character.type);
     const possibleMoves = this.getPossibleMoves(enemy.position, moveRange);
 
-    // Фильтруем только свободные клетки
     const freeMoves = possibleMoves.filter((pos) => !this.positionedCharacters.some((char) => char.position === pos));
 
     if (freeMoves.length > 0) {
@@ -286,9 +295,7 @@ class GameController {
         const newX = x + dx;
         const newY = y + dy;
 
-        // Проверяем границы поля
         if (newX >= 0 && newX < this.boardSize && newY >= 0 && newY < this.boardSize) {
-          // Проверяем расстояние (движение как ферзь)
           if (Math.max(Math.abs(dx), Math.abs(dy)) <= range) {
             moves.push(newY * this.boardSize + newX);
           }
@@ -321,23 +328,18 @@ class GameController {
     const character = this.positionedCharacters.find((char) => char.position === index);
 
     if (!character) {
-      // Пустая клетка
       if (this.selectedCharacter && this.isValidMove(this.selectedCharacter.position, index)) {
-        // Можно переместиться
         this.gamePlay.setCursor(cursors.pointer);
         this.gamePlay.selectCell(index, 'green');
       } else {
         this.gamePlay.setCursor(cursors.notallowed);
       }
     } else if (this.isPlayerCharacter(character.character.type)) {
-      // Свой персонаж
       this.gamePlay.setCursor(cursors.pointer);
     } else if (this.isEnemy(character.character.type)) {
-      // Враг
       if (this.selectedCharacter) {
         const attackRange = getAttackRange(this.selectedCharacter.character.type);
         if (canAttack(this.selectedCharacter.position, index, attackRange, this.boardSize)) {
-          // Можно атаковать
           this.gamePlay.setCursor(cursors.crosshair);
           this.gamePlay.selectCell(index, 'red');
         } else {
@@ -372,14 +374,12 @@ class GameController {
       return;
     }
 
-    // Повышение уровня выживших персонажей
     const playerChars = this.positionedCharacters.filter(
       (char) => this.isPlayerCharacter(char.character.type),
     );
 
     playerChars.forEach((char) => {
       char.character.health = Math.min(char.character.health + 80, 100);
-
       const healthBonus = (80 + char.character.health) / 100;
       char.character.attack = Math.max(
         char.character.attack,
@@ -389,22 +389,18 @@ class GameController {
         char.character.defence,
         char.character.defence * healthBonus,
       );
-
       char.character.level++;
     });
 
     this.gamePlay.drawUi(levelThemes[this.currentLevel]);
 
-    // Генерация новых врагов
     const enemyTeam = generateTeam(enemyTypes, this.currentLevel, 4);
-    const newEnemyPositions = this.getRandomPositions(this.enemyPositions, 4);
+    const newEnemyPositions = this.getUniquePositions(this.enemyPositions, 4);
 
-    // Удаляем старых врагов
     this.positionedCharacters = this.positionedCharacters.filter(
       (char) => this.isPlayerCharacter(char.character.type),
     );
 
-    // Добавляем новых врагов
     enemyTeam.characters.forEach((character, index) => {
       this.positionedCharacters.push(
         new PositionedCharacter(character, newEnemyPositions[index]),
@@ -421,12 +417,14 @@ class GameController {
     this.gamePlay.showError('Победа! Вы прошли все уровни!');
     this.maxScore = Math.max(this.maxScore, this.score);
     this.currentPlayer = 'gameover';
+    this.clearSelection();
   }
 
   gameOver() {
     this.gamePlay.showError('Game Over! Вы проиграли!');
     this.maxScore = Math.max(this.maxScore, this.score);
     this.currentPlayer = 'gameover';
+    this.clearSelection();
   }
 
   isGameOver() {
@@ -463,10 +461,10 @@ class GameController {
     this.score = savedState.score;
     this.maxScore = savedState.maxScore || 0;
     this.currentPlayer = savedState.currentPlayer;
+    this.selectedCharacter = null;
 
     this.gamePlay.drawUi(savedState.theme);
 
-    // Восстанавливаем персонажей
     this.positionedCharacters = savedState.positionedCharacters.map((data) => {
       let CharacterClass;
       switch (data.character.type) {

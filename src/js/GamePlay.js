@@ -71,6 +71,9 @@ class GamePlay {
   redrawPositions(positions) {
     for (const cell of this.cells) {
       cell.innerHTML = '';
+      cell.style.backgroundColor = '';
+      cell.style.outline = '';
+      cell.classList.remove('selected', 'selected-yellow', 'selected-green', 'selected-red');
     }
 
     for (const position of positions) {
